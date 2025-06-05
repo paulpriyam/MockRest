@@ -40,8 +40,8 @@ export function ConfluenceDocsList({ documents, selectedDocId, onSelectDoc, onTo
             >
               <span className="truncate text-sm font-medium">{doc.title}</span>
             </Button>
-            <div className="flex-shrink-0 flex items-center" onClick={(e) => e.stopPropagation()}>
-              {doc.isMockActive ? <Server className="h-4 w-4 text-green-500 mr-1" /> : <ServerOff className="h-4 w-4 text-red-500 mr-1"/>}
+            <div className="flex-shrink-0 flex items-center pl-2" onClick={(e) => e.stopPropagation()}>
+              {doc.isMockActive ? <Server className="h-4 w-4 text-green-500 mr-1.5" /> : <ServerOff className="h-4 w-4 text-red-500 mr-1.5"/>}
               <Switch
                 id={`mock-toggle-${doc.id}`}
                 checked={doc.isMockActive}
