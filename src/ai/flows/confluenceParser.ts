@@ -1,3 +1,4 @@
+
 import type { ApiEndpointDefinition } from '@/lib/types';
 
 // This is a mock implementation. In a real scenario, this would involve complex parsing via Genkit AI.
@@ -29,71 +30,100 @@ export async function parseConfluenceApiDocumentation(url: string): Promise<{ ti
     }
   }
 
-  const endpoints: ApiEndpointDefinition[] = [
-    {
-      id: `ep_${Date.now()}_1`,
-      method: 'GET',
-      path: '/api/v1/users',
-      description: 'Retrieves a list of all users in the system. Supports pagination.',
-      defaultResponse: JSON.stringify({
-        page: 1,
-        pageSize: 20,
-        totalUsers: 150,
-        users: [{ id: 'user123', name: 'Alice Wonderland', email: 'alice@example.com' }]
-      }, null, 2),
-    },
-    {
-      id: `ep_${Date.now()}_2`,
-      method: 'POST',
-      path: '/api/v1/users',
-      description: 'Creates a new user with the provided details.',
-      defaultResponse: JSON.stringify({
-        id: 'user456',
-        name: 'Bob The Builder',
-        email: 'bob@example.com',
-        status: 'created',
-        createdAt: new Date().toISOString()
-      }, null, 2),
-    },
-    {
-      id: `ep_${Date.now()}_3`,
-      method: 'GET',
-      path: '/api/v1/products/{productId}',
-      description: 'Fetches detailed information for a specific product by its ID.',
-      defaultResponse: JSON.stringify({
-        productId: 'prod789',
-        name: 'Super Widget',
-        price: 29.99,
-        inStock: true,
-        specs: { color: 'blue', weight: '250g' }
-      }, null, 2),
-    },
-    {
-      id: `ep_${Date.now()}_4`,
-      method: 'PUT',
-      path: '/api/v1/products/{productId}',
-      description: 'Updates an existing product. All fields are replaced.',
-      defaultResponse: JSON.stringify({
-        productId: 'prod789',
-        name: 'Super Widget Deluxe',
-        price: 32.50,
-        inStock: true,
-        status: 'updated',
-        updatedAt: new Date().toISOString()
-      }, null, 2),
-    },
-    {
-      id: `ep_${Date.now()}_5`,
-      method: 'DELETE',
-      path: '/api/v1/orders/{orderId}',
-      description: 'Deletes a specific order. This action is irreversible.',
-      defaultResponse: JSON.stringify({
-        orderId: 'order101',
-        status: 'deleted',
-        deletedAt: new Date().toISOString()
-      }, null, 2),
-    }
-  ];
+  let returnedEndpoints: ApiEndpointDefinition[];
 
-  return { title, endpoints };
+  if (url.toLowerCase().includes("edc")) {
+    returnedEndpoints = [
+      {
+        id: `ep_edc_${Date.now()}_details`,
+        method: 'GET',
+        path: '/api/v1/edc/transaction/history',
+        description: 'Retrieves detailed transaction history for EDC services.',
+        defaultResponse: JSON.stringify({
+          reportId: `EDC_REPORT_${Date.now()}`,
+          generatedAt: new Date().toISOString(),
+          filterCriteria: "LAST_7_DAYS",
+          summary: {
+            totalTransactions: 5,
+            totalAmount: 750.00,
+            currency: "IDR"
+          },
+          transactions: [
+            { id: 'edc_tx_abc_123', amount: 150.75, status: 'completed', timestamp: new Date(Date.now() - 86400000).toISOString() },
+            { id: 'edc_tx_def_456', amount: 88.00, status: 'completed', timestamp: new Date(Date.now() - 172800000).toISOString() }
+          ]
+        }, null, 2),
+      }
+    ];
+  } else {
+    // The original set of 5 mock endpoints
+    returnedEndpoints = [
+      {
+        id: `ep_generic_${Date.now()}_1`,
+        method: 'GET',
+        path: '/api/v1/users',
+        description: 'Retrieves a list of all users in the system. Supports pagination.',
+        defaultResponse: JSON.stringify({
+          page: 1,
+          pageSize: 20,
+          totalUsers: 150,
+          users: [{ id: 'user123', name: 'Alice Wonderland', email: 'alice@example.com' }]
+        }, null, 2),
+      },
+      {
+        id: `ep_generic_${Date.now()}_2`,
+        method: 'POST',
+        path: '/api/v1/users',
+        description: 'Creates a new user with the provided details.',
+        defaultResponse: JSON.stringify({
+          id: 'user456',
+          name: 'Bob The Builder',
+          email: 'bob@example.com',
+          status: 'created',
+          createdAt: new Date().toISOString()
+        }, null, 2),
+      },
+      {
+        id: `ep_generic_${Date.now()}_3`,
+        method: 'GET',
+        path: '/api/v1/products/{productId}',
+        description: 'Fetches detailed information for a specific product by its ID.',
+        defaultResponse: JSON.stringify({
+          productId: 'prod789',
+          name: 'Super Widget',
+          price: 29.99,
+          inStock: true,
+          specs: { color: 'blue', weight: '250g' }
+        }, null, 2),
+      },
+      {
+        id: `ep_generic_${Date.now()}_4`,
+        method: 'PUT',
+        path: '/api/v1/products/{productId}',
+        description: 'Updates an existing product. All fields are replaced.',
+        defaultResponse: JSON.stringify({
+          productId: 'prod789',
+          name: 'Super Widget Deluxe',
+          price: 32.50,
+          inStock: true,
+          status: 'updated',
+          updatedAt: new Date().toISOString()
+        }, null, 2),
+      },
+      {
+        id: `ep_generic_${Date.now()}_5`,
+        method: 'DELETE',
+        path: '/api/v1/orders/{orderId}',
+        description: 'Deletes a specific order. This action is irreversible.',
+        defaultResponse: JSON.stringify({
+          orderId: 'order101',
+          status: 'deleted',
+          deletedAt: new Date().toISOString()
+        }, null, 2),
+      }
+    ];
+  }
+
+  return { title, endpoints: returnedEndpoints };
 }
+
