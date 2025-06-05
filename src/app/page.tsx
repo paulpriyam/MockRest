@@ -1,12 +1,13 @@
 
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { ConfluenceImportForm } from "@/components/import/ConfluenceImportForm";
 import { EndpointGrid } from "@/components/endpoints/EndpointGrid";
 import { ResponseEditorDialog } from "@/components/editor/ResponseEditorDialog";
 import type { ApiEndpointDefinition, ConfluenceDocument, MockedEndpoint } from "@/lib/types";
 import type { ParsedConfluenceData } from "@/actions/confluence";
+import { updateActiveMockAction, type UpdateActiveMockResult } from "@/actions/mockAdmin";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
@@ -18,6 +19,8 @@ export default function HomePage() {
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [editingInfo, setEditingInfo] = useState<{ docId: string; endpoint: MockedEndpoint } | null>(null);
   const { toast } = useToast();
+  const [serverActiveDocId, setServerActiveDocId] = useState<string | null>(null);
+
 
   const handleDocumentParsed = useCallback((parsedData: ParsedConfluenceData) => {
     const newDocument: ConfluenceDocument = {
@@ -28,7 +31,7 @@ export default function HomePage() {
         ...def, 
         mockResponse: def.defaultResponse, 
       })),
-      isMockActive: false, // Initialize mock server as inactive
+      isMockActive: false, 
     };
 
     setConfluenceDocs(prevDocs => {
@@ -36,8 +39,11 @@ export default function HomePage() {
       let updatedDocs;
       if (existingDocIndex !== -1) {
         updatedDocs = [...prevDocs];
-        // Preserve isMockActive state if document is re-parsed
-        updatedDocs[existingDocIndex] = { ...newDocument, isMockActive: prevDocs[existingDocIndex].isMockActive };
+        updatedDocs[existingDocIndex] = { 
+          ...newDocument, 
+          // Preserve UI active state if re-parsed, server will decide true active
+          isMockActive: prevDocs[existingDocIndex].isMockActive 
+        };
       } else {
         updatedDocs = [...prevDocs, newDocument];
       }
@@ -59,29 +65,48 @@ export default function HomePage() {
     setSelectedDocId(docId);
   };
 
-  const handleToggleMockActive = useCallback((docId: string) => {
-    let updatedDocTitle = "";
-    let newMockState = false;
+  const handleToggleMockActive = useCallback(async (docIdToToggle: string) => {
+    const docToToggle = confluenceDocs.find(d => d.id === docIdToToggle);
+    if (!docToToggle) return;
 
-    setConfluenceDocs(prevDocs =>
-      prevDocs.map(doc => {
-        if (doc.id === docId) {
-          updatedDocTitle = doc.title;
-          newMockState = !doc.isMockActive;
-          return { ...doc, isMockActive: newMockState };
-        }
-        return doc;
-      })
-    );
-    
-    if (updatedDocTitle) {
+    const newUiMockState = !docToToggle.isMockActive;
+    let actionResult: UpdateActiveMockResult;
+
+    if (newUiMockState) { // User wants to activate this document
+      actionResult = await updateActiveMockAction(docToToggle);
+    } else { // User wants to deactivate this document
+      // If this is the one currently active on the server, tell server to deactivate all.
+      // Otherwise, it's just a UI change for a doc that wasn't server-active.
+      if (serverActiveDocId === docIdToToggle) {
+        actionResult = await updateActiveMockAction(null);
+      } else {
+        // Simulate success for UI change if it wasn't the server-active one
+        actionResult = { success: true, message: `"${docToToggle.title}" UI mock state toggled off.`, activeDocId: serverActiveDocId };
+      }
+    }
+
+    if (actionResult.success) {
+      setServerActiveDocId(actionResult.activeDocId);
+      setConfluenceDocs(prevDocs =>
+        prevDocs.map(doc => ({
+          ...doc,
+          // The `isMockActive` in UI reflects which doc is active on the SERVER
+          isMockActive: doc.id === actionResult.activeDocId,
+        }))
+      );
       toast({
-        title: `Mock Server ${newMockState ? 'Activated' : 'Deactivated'}`,
-        description: `Mocks for "${updatedDocTitle}" are now ${newMockState ? 'active' : 'inactive'}.`,
-        variant: newMockState ? "default" : "destructive",
+        title: actionResult.activeDocId ? `Mock Server Active` : 'Mock Server Deactivated',
+        description: actionResult.message,
+        variant: actionResult.activeDocId ? "default" : "destructive",
+      });
+    } else {
+      toast({
+        title: "Error",
+        description: actionResult.message || "Failed to update mock server state.",
+        variant: "destructive",
       });
     }
-  }, [toast]);
+  }, [confluenceDocs, toast, serverActiveDocId]);
 
   const handleOpenEditDialog = (docId: string, endpointId: string) => {
     const doc = confluenceDocs.find(d => d.id === docId);
@@ -96,27 +121,62 @@ export default function HomePage() {
   };
 
   const handleSaveResponse = (docId: string, endpointId: string, newResponse: string) => {
+     let activeDocChanged = false;
     setConfluenceDocs(prevDocs =>
-      prevDocs.map(doc =>
-        doc.id === docId
-          ? {
-              ...doc,
-              endpoints: doc.endpoints.map(ep =>
-                ep.id === endpointId ? { ...ep, mockResponse: newResponse } : ep
-              ),
-            }
-          : doc
-      )
+      prevDocs.map(doc => {
+        if (doc.id === docId) {
+          const updatedEndpoints = doc.endpoints.map(ep =>
+            ep.id === endpointId ? { ...ep, mockResponse: newResponse } : ep
+          );
+          // If this document is the currently active one on the server, we need to re-sync its state
+          if (doc.id === serverActiveDocId) {
+            activeDocChanged = true;
+            return { ...doc, endpoints: updatedEndpoints, isMockActive: true }; // Ensure isMockActive is true
+          }
+          return { ...doc, endpoints: updatedEndpoints };
+        }
+        return doc;
+      })
     );
     setEditingInfo(null); 
     toast({
       title: "Response Updated",
       description: `Mock response for endpoint has been saved.`,
     });
+
+    // If the edited document was the active one, update the server state
+    if (activeDocChanged) {
+      const updatedDoc = confluenceDocs.find(d => d.id === docId);
+      if (updatedDoc) {
+         // Find the specific document from state that just got updated
+        const freshDoc = confluenceDocs.find(d => d.id === docId);
+        if (freshDoc) {
+            const freshEndpoints = freshDoc.endpoints.map(ep => 
+                ep.id === endpointId ? { ...ep, mockResponse: newResponse } : ep
+            );
+            updateActiveMockAction({...freshDoc, endpoints: freshEndpoints, isMockActive: true});
+        }
+      }
+    }
   };
 
+  // Reflect server-side active doc on initial load or if serverActiveDocId changes
+  useEffect(() => {
+    // This effect primarily ensures UI consistency if serverActiveDocId is ever out of sync
+    // with the confluenceDocs' isMockActive states.
+    setConfluenceDocs(prevDocs =>
+      prevDocs.map(doc => ({
+        ...doc,
+        isMockActive: doc.id === serverActiveDocId,
+      }))
+    );
+  }, [serverActiveDocId]);
+
+
   const selectedDocument = confluenceDocs.find(doc => doc.id === selectedDocId);
-  const endpointsToDisplay = selectedDocument ? selectedDocument.endpoints : [];
+  // The true mock active status comes from serverActiveDocId reflected in each doc's isMockActive
+  const isSelectedDocActuallyMockActive = selectedDocument ? selectedDocument.isMockActive : false;
+
 
   return (
     <div className="flex flex-row flex-grow space-x-0 md:space-x-6 h-[calc(100vh-theme(spacing.16)-theme(spacing.16))]">
@@ -144,21 +204,21 @@ export default function HomePage() {
                 <LayoutDashboard className="mr-3 h-7 w-7" />
                 Endpoints for: <span className="ml-2 font-normal italic truncate max-w-xs">{selectedDocument.title}</span>
               </h2>
-              <Badge variant={selectedDocument.isMockActive ? "default" : "secondary"} className="whitespace-nowrap">
-                {selectedDocument.isMockActive ? 
+              <Badge variant={isSelectedDocActuallyMockActive ? "default" : "secondary"} className="whitespace-nowrap">
+                {isSelectedDocActuallyMockActive ? 
                   <Server className="mr-2 h-4 w-4" /> : 
                   <ServerOff className="mr-2 h-4 w-4" />
                 }
-                {selectedDocument.isMockActive ? "Mock Active" : "Mock Inactive"}
+                {isSelectedDocActuallyMockActive ? "Mock Active" : "Mock Inactive"}
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground mb-6">
-              To use these mocks, ensure the mock server for this document is active. Your application can then hit the defined paths.
+              To use these mocks, ensure the mock server for this document is active. Your application can then hit paths under <code className="bg-muted px-1 py-0.5 rounded text-xs">/api/mock/...</code>.
             </p>
             <EndpointGrid 
-              endpoints={endpointsToDisplay} 
+              endpoints={selectedDocument.endpoints} 
               onEditResponse={(endpointId) => selectedDocId && handleOpenEditDialog(selectedDocId, endpointId)}
-              isMockActive={selectedDocument.isMockActive}
+              isMockActive={isSelectedDocActuallyMockActive}
             />
           </div>
         ) : (
