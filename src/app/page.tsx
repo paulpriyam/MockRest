@@ -25,14 +25,14 @@ export default function HomePage() {
   const handleDocumentParsed = useCallback(
     async (parsedData: ParsedConfluenceData) => {
       const newDocument: ConfluenceDocument = {
-        id: parsedData.confluenceLink,
+        id: parsedData.confluenceLink, // Use the link as a unique ID
         title: parsedData.title,
         confluenceLink: parsedData.confluenceLink,
         endpoints: parsedData.endpoints.map((def) => ({
           ...def,
           mockResponse: def.defaultResponse,
         })),
-        isMockActive: false, // Default for a new doc or re-parsed one before server sync
+        isMockActive: false, 
       };
 
       let reSyncActiveDoc = false;
@@ -44,9 +44,8 @@ export default function HomePage() {
         if (existingDocIndex !== -1) {
           const oldDoc = prevDocs[existingDocIndex];
           updatedDocs = [...prevDocs];
-          docToResync = { // Prepare the document with fresh data
+          docToResync = { 
             ...newDocument,
-            // its isMockActive status will be true if it *is* the serverActiveDocId
             isMockActive: oldDoc.id === serverActiveDocId, 
           };
           updatedDocs[existingDocIndex] = docToResync;
@@ -60,10 +59,10 @@ export default function HomePage() {
         return updatedDocs;
       });
 
-      setSelectedDocId(newDocument.id); // Always select the newly parsed/updated document
+      setSelectedDocId(newDocument.id); 
 
       if (reSyncActiveDoc && docToResync) {
-        const result = await updateActiveMockAction(docToResync); // Send updated doc to server
+        const result = await updateActiveMockAction(docToResync); 
         if (result.success) {
           toast({
             title: "Active Mock Refreshed",
@@ -76,7 +75,6 @@ export default function HomePage() {
             variant: "destructive",
           });
         }
-        // Sync local serverActiveDocId with the actual state from the server action response
         setServerActiveDocId(result.activeDocId);
       } else {
         toast({
@@ -85,7 +83,7 @@ export default function HomePage() {
         });
       }
     },
-    [toast, serverActiveDocId, updateActiveMockAction] // updateActiveMockAction is stable
+    [toast, serverActiveDocId, updateActiveMockAction] 
   );
 
   const handleSelectDoc = (docId: string) => {
@@ -97,18 +95,19 @@ export default function HomePage() {
     if (!docToToggle) return;
 
     let actionResult: UpdateActiveMockResult;
-
-    // If user is trying to activate this doc, or if it's already the active one and they're deactivating it.
-    if (docIdToToggle !== serverActiveDocId || !docToToggle.isMockActive) { // Trying to activate a new doc, or deactivating the current
-         actionResult = await updateActiveMockAction(docToToggle.isMockActive ? null : docToToggle);
-    } else { // Trying to activate a doc that is already active (no change) or deactivating an inactive doc (no change to server)
-        // This case should ideally not happen if UI is in sync, but as a fallback:
-        actionResult = { success: true, message: "No change to server mock state.", activeDocId: serverActiveDocId };
-    }
+    
+    // If trying to activate a doc, or deactivating the currently active one.
+    // The new state for the doc being toggled is `!docToToggle.isMockActive`
+    // If `!docToToggle.isMockActive` is true, it means we are trying to activate it.
+    // So, we send `docToToggle` to `updateActiveMockAction`.
+    // If `!docToToggle.isMockActive` is false, it means we are trying to deactivate it.
+    // So, we send `null` to `updateActiveMockAction`.
+    const newActiveStateForToggledDoc = !docToToggle.isMockActive;
+    actionResult = await updateActiveMockAction(newActiveStateForToggledDoc ? docToToggle : null);
 
 
     if (actionResult.success) {
-      setServerActiveDocId(actionResult.activeDocId); // This will trigger the useEffect below
+      setServerActiveDocId(actionResult.activeDocId); 
       toast({
         title: actionResult.activeDocId ? `Mock Server Active` : 'Mock Server Deactivated',
         description: actionResult.message,
@@ -120,7 +119,7 @@ export default function HomePage() {
         description: actionResult.message || "Failed to update mock server state.",
         variant: "destructive",
       });
-       setServerActiveDocId(actionResult.activeDocId); // Reflect server state even on failure
+       setServerActiveDocId(actionResult.activeDocId); 
     }
   }, [confluenceDocs, toast, serverActiveDocId, updateActiveMockAction]);
 
@@ -149,7 +148,8 @@ export default function HomePage() {
           const potentiallyUpdatedDoc = { ...doc, endpoints: updatedEndpoints };
           if (doc.id === serverActiveDocId) {
             activeDocChangedOnServer = true;
-            updatedDocForServer = potentiallyUpdatedDoc; // This has the new response
+            // Pass the updated doc with its current isMockActive status (which should be true)
+            updatedDocForServer = { ...potentiallyUpdatedDoc, isMockActive: true }; 
           }
           return potentiallyUpdatedDoc;
         }
@@ -158,14 +158,14 @@ export default function HomePage() {
     );
     
     setEditingInfo(null);
+    // Toast for local save is immediate
     toast({
       title: "Response Updated",
       description: `Mock response for endpoint has been saved locally.`,
     });
 
     if (activeDocChangedOnServer && updatedDocForServer) {
-      // Ensure the document sent to server has isMockActive as true
-      const result = await updateActiveMockAction({...updatedDocForServer, isMockActive: true});
+      const result = await updateActiveMockAction(updatedDocForServer);
       if(result.success) {
         toast({
           title: "Active Mock Updated",
@@ -178,7 +178,7 @@ export default function HomePage() {
           variant: "destructive",
         });
       }
-      setServerActiveDocId(result.activeDocId); // Reflect server state
+      setServerActiveDocId(result.activeDocId); 
     }
   }, [serverActiveDocId, toast, updateActiveMockAction]);
 
@@ -193,6 +193,7 @@ export default function HomePage() {
 
 
   const selectedDocument = confluenceDocs.find(doc => doc.id === selectedDocId);
+  // isSelectedDocActuallyMockActive should be derived from selectedDocument after the effect updates it
   const isSelectedDocActuallyMockActive = selectedDocument ? selectedDocument.isMockActive : false;
 
 
@@ -219,7 +220,7 @@ export default function HomePage() {
           <>
             <Separator className="my-6" />
             {selectedDocument ? (
-              <div>
+              <div key={selectedDocument.id}> {/* Added key here */}
                 <div className="flex items-center justify-between mb-1">
                   <h2 className="text-2xl font-headline font-semibold text-primary flex items-center">
                     <LayoutDashboard className="mr-3 h-7 w-7" />
@@ -266,4 +267,3 @@ export default function HomePage() {
     </div>
   );
 }
-
