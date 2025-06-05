@@ -2,16 +2,26 @@ import type { ApiEndpointDefinition } from '@/lib/types';
 
 // This is a mock implementation. In a real scenario, this would involve complex parsing via Genkit AI.
 // Assume this function is already instrumented and available as a Genkit flow.
-export async function parseConfluenceApiDocumentation(url: string): Promise<ApiEndpointDefinition[]> {
+export async function parseConfluenceApiDocumentation(url: string): Promise<{ title: string; endpoints: ApiEndpointDefinition[] }> {
   // console.log(`AI Flow: Parsing Confluence URL: ${url}`);
-  // Simulate network delay and parsing
   await new Promise(resolve => setTimeout(resolve, 1500));
 
+  let title = "Untitled API Document";
+  try {
+    const urlObject = new URL(url);
+    const pathParts = urlObject.pathname.split('/');
+    const lastPart = pathParts.pop() || pathParts.pop(); // Get last non-empty part
+    if (lastPart) {
+      title = decodeURIComponent(lastPart.replace(/[+-]/g, ' ')).substring(0, 50); // Basic title extraction
+    } else if (urlObject.hostname) {
+      title = `Doc from ${urlObject.hostname}`;
+    }
+  } catch (e) {
+    // console.warn("Could not parse URL for title, using default.");
+  }
+  
+
   if (!url || (!url.includes("http://") && !url.includes("https://"))) {
-    // Basic validation for a URL-like string
-    // In a real scenario, more robust validation or specific Confluence link patterns would be checked.
-    // For this mock, any non-empty string that looks vaguely like a URL might pass for "testing" purposes.
-    // However, for the "happy path" simulation, we'll check for confluence keyword.
     if (url && !url.toLowerCase().includes("confluence")) {
        console.warn("URL does not seem to be a Confluence link, but proceeding with mock data for demonstration.");
     } else if (!url) {
@@ -19,10 +29,7 @@ export async function parseConfluenceApiDocumentation(url: string): Promise<ApiE
     }
   }
 
-
-  // Simulate finding some API endpoints
-  // These examples are more diverse
-  return [
+  const endpoints: ApiEndpointDefinition[] = [
     {
       id: `ep_${Date.now()}_1`,
       method: 'GET',
@@ -87,4 +94,6 @@ export async function parseConfluenceApiDocumentation(url: string): Promise<ApiE
       }, null, 2),
     }
   ];
+
+  return { title, endpoints };
 }

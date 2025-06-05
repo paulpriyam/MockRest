@@ -11,3 +11,10 @@ export interface ApiEndpointDefinition {
 export interface MockedEndpoint extends ApiEndpointDefinition {
   mockResponse: string; // Editable mock response, initially same as defaultResponse
 }
+
+export interface ConfluenceDocument {
+  id: string; // Unique ID for this parsed document, typically the confluenceLink
+  title: string;
+  confluenceLink: string;
+  endpoints: MockedEndpoint[];
+}

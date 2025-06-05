@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect } from "react";
@@ -16,10 +17,10 @@ import type { MockedEndpoint } from "@/lib/types";
 import { Save, X } from "lucide-react";
 
 interface ResponseEditorDialogProps {
-  endpoint: MockedEndpoint | null;
+  endpoint: MockedEndpoint | null; // docId is now part of editingInfo in parent
   isOpen: boolean;
   onClose: () => void;
-  onSave: (endpointId: string, newResponse: string) => void;
+  onSave: (endpointId: string, newResponse: string) => void; // docId will be passed from parent's state
 }
 
 export function ResponseEditorDialog({ endpoint, isOpen, onClose, onSave }: ResponseEditorDialogProps) {
@@ -34,8 +35,8 @@ export function ResponseEditorDialog({ endpoint, isOpen, onClose, onSave }: Resp
   if (!endpoint) return null;
 
   const handleSave = () => {
-    onSave(endpoint.id, responseBody);
-    onClose();
+    onSave(endpoint.id, responseBody); // Parent (page.tsx) will use its 'editingInfo.docId'
+    // onClose(); // Closing is now handled by parent after save for better state management
   };
 
   return (

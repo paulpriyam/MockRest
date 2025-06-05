@@ -1,3 +1,4 @@
+
 "use server";
 
 import { z } from "zod";
@@ -8,9 +9,15 @@ const ConfluenceImportSchema = z.object({
   confluenceLink: z.string().min(1, "Confluence link cannot be empty.").url("Please enter a valid URL."),
 });
 
+export interface ParsedConfluenceData {
+  title: string;
+  confluenceLink: string;
+  endpoints: ApiEndpointDefinition[];
+}
+
 export interface ParseResult {
   success: boolean;
-  data?: ApiEndpointDefinition[];
+  data?: ParsedConfluenceData;
   error?: string;
 }
 
@@ -31,11 +38,15 @@ export async function parseConfluenceLinkAction(
     }
 
     const confluenceLink = validatedFields.data.confluenceLink;
-    const parsedEndpoints = await parseConfluenceApiDocumentation(confluenceLink);
+    const { title, endpoints } = await parseConfluenceApiDocumentation(confluenceLink);
     
     return {
       success: true,
-      data: parsedEndpoints,
+      data: {
+        title,
+        confluenceLink,
+        endpoints,
+      },
     };
   } catch (error) {
     console.error("Error parsing Confluence link:", error);

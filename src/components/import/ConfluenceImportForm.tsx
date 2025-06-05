@@ -9,12 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { AlertCircle, Loader2, UploadCloud } from "lucide-react";
-import { parseConfluenceLinkAction, type ParseResult } from "@/actions/confluence";
-import type { ApiEndpointDefinition } from "@/lib/types";
+import { parseConfluenceLinkAction, type ParseResult, type ParsedConfluenceData } from "@/actions/confluence";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 interface ConfluenceImportFormProps {
-  onEndpointsParsed: (endpoints: ApiEndpointDefinition[]) => void;
+  onEndpointsParsed: (data: ParsedConfluenceData) => void;
 }
 
 function SubmitButton() {
@@ -53,7 +52,7 @@ export function ConfluenceImportForm({ onEndpointsParsed }: ConfluenceImportForm
       <CardHeader>
         <CardTitle className="font-headline text-2xl">Import API Endpoints</CardTitle>
         <CardDescription>
-          Paste your Confluence link below to automatically parse and set up mock API endpoints.
+          Paste your Confluence link below to automatically parse its title and API endpoints.
         </CardDescription>
       </CardHeader>
       <form action={formAction} ref={formRef}>
@@ -80,7 +79,7 @@ export function ConfluenceImportForm({ onEndpointsParsed }: ConfluenceImportForm
               <AlertCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
               <AlertTitle className="text-green-700 dark:text-green-300">Success</AlertTitle>
               <AlertDescription className="text-green-600 dark:text-green-400">
-                {state.data.length} endpoint(s) parsed successfully.
+                Document "{state.data.title}" with {state.data.endpoints.length} endpoint(s) parsed successfully.
               </AlertDescription>
             </Alert>
           )}
