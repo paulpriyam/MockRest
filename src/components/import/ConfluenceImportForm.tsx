@@ -1,6 +1,8 @@
+
 "use client";
 
-import { useFormState, useFormStatus } from "react-dom";
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import { useEffect, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -36,7 +38,7 @@ function SubmitButton() {
 
 export function ConfluenceImportForm({ onEndpointsParsed }: ConfluenceImportFormProps) {
   const initialState: ParseResult | null = null;
-  const [state, formAction] = useFormState(parseConfluenceLinkAction, initialState);
+  const [state, formAction] = useActionState(parseConfluenceLinkAction, initialState);
   const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
