@@ -1,3 +1,4 @@
+
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'OPTIONS' | 'HEAD';
 
 export interface ApiEndpointDefinition {
@@ -17,4 +18,5 @@ export interface ConfluenceDocument {
   title: string;
   confluenceLink: string;
   endpoints: MockedEndpoint[];
+  isMockActive: boolean; // Tracks if the mock server for this document is active
 }

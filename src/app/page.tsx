@@ -8,9 +8,10 @@ import { ResponseEditorDialog } from "@/components/editor/ResponseEditorDialog";
 import type { ApiEndpointDefinition, ConfluenceDocument, MockedEndpoint } from "@/lib/types";
 import type { ParsedConfluenceData } from "@/actions/confluence";
 import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { ConfluenceDocsList } from "@/components/confluence/ConfluenceDocsList";
-import { LayoutDashboard } from "lucide-react";
+import { LayoutDashboard, Server, ServerOff } from "lucide-react";
 
 export default function HomePage() {
   const [confluenceDocs, setConfluenceDocs] = useState<ConfluenceDocument[]>([]);
@@ -20,13 +21,14 @@ export default function HomePage() {
 
   const handleDocumentParsed = useCallback((parsedData: ParsedConfluenceData) => {
     const newDocument: ConfluenceDocument = {
-      id: parsedData.confluenceLink, // Use link as a unique ID for the document
+      id: parsedData.confluenceLink, 
       title: parsedData.title,
       confluenceLink: parsedData.confluenceLink,
       endpoints: parsedData.endpoints.map(def => ({
-        ...def, // Includes id, method, path, description, defaultResponse
-        mockResponse: def.defaultResponse, // Initialize mockResponse
+        ...def, 
+        mockResponse: def.defaultResponse, 
       })),
+      isMockActive: false, // Initialize mock server as inactive
     };
 
     setConfluenceDocs(prevDocs => {
@@ -34,14 +36,14 @@ export default function HomePage() {
       let updatedDocs;
       if (existingDocIndex !== -1) {
         updatedDocs = [...prevDocs];
-        updatedDocs[existingDocIndex] = newDocument; // Replace if link parsed again
+        // Preserve isMockActive state if document is re-parsed
+        updatedDocs[existingDocIndex] = { ...newDocument, isMockActive: prevDocs[existingDocIndex].isMockActive };
       } else {
         updatedDocs = [...prevDocs, newDocument];
       }
       return updatedDocs;
     });
 
-    // If no doc is selected or this is the first doc, select it
     if (!selectedDocId || confluenceDocs.length === 0) {
       setSelectedDocId(newDocument.id);
     }
@@ -56,6 +58,30 @@ export default function HomePage() {
   const handleSelectDoc = (docId: string) => {
     setSelectedDocId(docId);
   };
+
+  const handleToggleMockActive = useCallback((docId: string) => {
+    let updatedDocTitle = "";
+    let newMockState = false;
+
+    setConfluenceDocs(prevDocs =>
+      prevDocs.map(doc => {
+        if (doc.id === docId) {
+          updatedDocTitle = doc.title;
+          newMockState = !doc.isMockActive;
+          return { ...doc, isMockActive: newMockState };
+        }
+        return doc;
+      })
+    );
+    
+    if (updatedDocTitle) {
+      toast({
+        title: `Mock Server ${newMockState ? 'Activated' : 'Deactivated'}`,
+        description: `Mocks for "${updatedDocTitle}" are now ${newMockState ? 'active' : 'inactive'}.`,
+        variant: newMockState ? "default" : "destructive",
+      });
+    }
+  }, [toast]);
 
   const handleOpenEditDialog = (docId: string, endpointId: string) => {
     const doc = confluenceDocs.find(d => d.id === docId);
@@ -82,7 +108,7 @@ export default function HomePage() {
           : doc
       )
     );
-    setEditingInfo(null); // Close dialog after save
+    setEditingInfo(null); 
     toast({
       title: "Response Updated",
       description: `Mock response for endpoint has been saved.`,
@@ -93,8 +119,7 @@ export default function HomePage() {
   const endpointsToDisplay = selectedDocument ? selectedDocument.endpoints : [];
 
   return (
-    <div className="flex flex-row flex-grow space-x-0 md:space-x-6 h-[calc(100vh-theme(spacing.16)-theme(spacing.16))]"> {/* Adjust height considering header & page padding */}
-      {/* Sidebar */}
+    <div className="flex flex-row flex-grow space-x-0 md:space-x-6 h-[calc(100vh-theme(spacing.16)-theme(spacing.16))]">
       <aside className="w-full md:w-1/4 lg:w-1/5 xl:w-1/6 border-r bg-card hidden md:flex flex-col">
         <div className="p-4 border-b">
           <h2 className="text-lg font-headline font-semibold text-primary">Parsed Documents</h2>
@@ -103,24 +128,37 @@ export default function HomePage() {
           documents={confluenceDocs}
           selectedDocId={selectedDocId}
           onSelectDoc={handleSelectDoc}
+          onToggleMockActive={handleToggleMockActive}
         />
       </aside>
 
-      {/* Main Content */}
-      <div className="flex-grow space-y-8 p-0 md:p-0 overflow-y-auto"> {/* Remove p-6 to use container padding */}
+      <div className="flex-grow space-y-8 p-0 md:p-0 overflow-y-auto">
         <ConfluenceImportForm onEndpointsParsed={handleDocumentParsed} />
         
         {(selectedDocument || confluenceDocs.length > 0) && <Separator className="my-6" />}
 
         {selectedDocument ? (
           <div>
-            <h2 className="text-2xl font-headline font-semibold mb-6 text-primary flex items-center">
-              <LayoutDashboard className="mr-3 h-7 w-7" />
-              Endpoints for: <span className="ml-2 font-normal italic truncate ">{selectedDocument.title}</span>
-            </h2>
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="text-2xl font-headline font-semibold text-primary flex items-center">
+                <LayoutDashboard className="mr-3 h-7 w-7" />
+                Endpoints for: <span className="ml-2 font-normal italic truncate max-w-xs">{selectedDocument.title}</span>
+              </h2>
+              <Badge variant={selectedDocument.isMockActive ? "default" : "secondary"} className="whitespace-nowrap">
+                {selectedDocument.isMockActive ? 
+                  <Server className="mr-2 h-4 w-4" /> : 
+                  <ServerOff className="mr-2 h-4 w-4" />
+                }
+                {selectedDocument.isMockActive ? "Mock Active" : "Mock Inactive"}
+              </Badge>
+            </div>
+            <p className="text-sm text-muted-foreground mb-6">
+              To use these mocks, ensure the mock server for this document is active. Your application can then hit the defined paths.
+            </p>
             <EndpointGrid 
               endpoints={endpointsToDisplay} 
-              onEditResponse={(endpointId) => selectedDocId && handleOpenEditDialog(selectedDocId, endpointId)} 
+              onEditResponse={(endpointId) => selectedDocId && handleOpenEditDialog(selectedDocId, endpointId)}
+              isMockActive={selectedDocument.isMockActive}
             />
           </div>
         ) : (
@@ -134,14 +172,13 @@ export default function HomePage() {
             </div>
           )
         )}
-         {/* Fallback for when no documents exist at all, handled by EndpointGrid's empty state */}
          {confluenceDocs.length === 0 && (
             <div>
                 <h2 className="text-2xl font-headline font-semibold mb-6 text-primary flex items-center">
                     <LayoutDashboard className="mr-3 h-7 w-7" />
                     Mocked Endpoints Dashboard
                 </h2>
-                <EndpointGrid endpoints={[]} onEditResponse={() => {}} />
+                <EndpointGrid endpoints={[]} onEditResponse={() => {}} isMockActive={false} />
             </div>
          )}
       </div>
