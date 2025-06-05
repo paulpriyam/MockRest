@@ -30,7 +30,7 @@ export function EndpointGrid({ endpoints, onEditResponse, isMockActive }: Endpoi
           <Construction className="h-5 w-5 !text-amber-600 dark:!text-amber-500" />
           <AlertTitle className="font-semibold">Mock Server Inactive</AlertTitle>
           <AlertDescription>
-            Activate the mock server for this document (using the switch in the sidebar) to make these endpoints available for testing.
+            Activate the mock server for this document (using the switch above) to make these endpoints available for testing.
           </AlertDescription>
         </Alert>
       )}

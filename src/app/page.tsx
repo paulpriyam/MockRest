@@ -9,7 +9,8 @@ import type { ApiEndpointDefinition, ConfluenceDocument, MockedEndpoint } from "
 import type { ParsedConfluenceData } from "@/actions/confluence";
 import { updateActiveMockAction, type UpdateActiveMockResult } from "@/actions/mockAdmin";
 import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { ConfluenceDocsList } from "@/components/confluence/ConfluenceDocsList";
 import { LayoutDashboard, Server, ServerOff } from "lucide-react";
@@ -25,7 +26,7 @@ export default function HomePage() {
   const handleDocumentParsed = useCallback(
     async (parsedData: ParsedConfluenceData) => {
       const newDocument: ConfluenceDocument = {
-        id: parsedData.confluenceLink, // Use the link as a unique ID
+        id: parsedData.confluenceLink, 
         title: parsedData.title,
         confluenceLink: parsedData.confluenceLink,
         endpoints: parsedData.endpoints.map((def) => ({
@@ -43,11 +44,11 @@ export default function HomePage() {
         let updatedDocs;
         if (existingDocIndex !== -1) {
           const oldDoc = prevDocs[existingDocIndex];
-          updatedDocs = [...prevDocs];
           docToResync = { 
             ...newDocument,
             isMockActive: oldDoc.id === serverActiveDocId, 
           };
+          updatedDocs = [...prevDocs];
           updatedDocs[existingDocIndex] = docToResync;
           
           if (oldDoc.id === serverActiveDocId) {
@@ -96,12 +97,6 @@ export default function HomePage() {
 
     let actionResult: UpdateActiveMockResult;
     
-    // If trying to activate a doc, or deactivating the currently active one.
-    // The new state for the doc being toggled is `!docToToggle.isMockActive`
-    // If `!docToToggle.isMockActive` is true, it means we are trying to activate it.
-    // So, we send `docToToggle` to `updateActiveMockAction`.
-    // If `!docToToggle.isMockActive` is false, it means we are trying to deactivate it.
-    // So, we send `null` to `updateActiveMockAction`.
     const newActiveStateForToggledDoc = !docToToggle.isMockActive;
     actionResult = await updateActiveMockAction(newActiveStateForToggledDoc ? docToToggle : null);
 
@@ -148,7 +143,6 @@ export default function HomePage() {
           const potentiallyUpdatedDoc = { ...doc, endpoints: updatedEndpoints };
           if (doc.id === serverActiveDocId) {
             activeDocChangedOnServer = true;
-            // Pass the updated doc with its current isMockActive status (which should be true)
             updatedDocForServer = { ...potentiallyUpdatedDoc, isMockActive: true }; 
           }
           return potentiallyUpdatedDoc;
@@ -158,7 +152,6 @@ export default function HomePage() {
     );
     
     setEditingInfo(null);
-    // Toast for local save is immediate
     toast({
       title: "Response Updated",
       description: `Mock response for endpoint has been saved locally.`,
@@ -193,7 +186,6 @@ export default function HomePage() {
 
 
   const selectedDocument = confluenceDocs.find(doc => doc.id === selectedDocId);
-  // isSelectedDocActuallyMockActive should be derived from selectedDocument after the effect updates it
   const isSelectedDocActuallyMockActive = selectedDocument ? selectedDocument.isMockActive : false;
 
 
@@ -208,7 +200,7 @@ export default function HomePage() {
             documents={confluenceDocs}
             selectedDocId={selectedDocId}
             onSelectDoc={handleSelectDoc}
-            onToggleMockActive={handleToggleMockActive}
+            // onToggleMockActive prop removed
           />
         </aside>
       )}
@@ -220,19 +212,30 @@ export default function HomePage() {
           <>
             <Separator className="my-6" />
             {selectedDocument ? (
-              <div key={selectedDocument.id}> {/* Added key here */}
-                <div className="flex items-center justify-between mb-1">
+              <div key={selectedDocument.id}>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-4 sm:gap-2">
                   <h2 className="text-2xl font-headline font-semibold text-primary flex items-center">
-                    <LayoutDashboard className="mr-3 h-7 w-7" />
-                    Endpoints for: <span className="ml-2 font-normal italic truncate max-w-xs">{selectedDocument.title}</span>
+                    <LayoutDashboard className="mr-3 h-7 w-7 flex-shrink-0" />
+                    <span className="truncate max-w-xs sm:max-w-md md:max-w-lg">Endpoints for: <span className="ml-1 font-normal italic">{selectedDocument.title}</span></span>
                   </h2>
-                  <Badge variant={isSelectedDocActuallyMockActive ? "default" : "secondary"} className="whitespace-nowrap">
-                    {isSelectedDocActuallyMockActive ? 
-                      <Server className="mr-2 h-4 w-4" /> : 
-                      <ServerOff className="mr-2 h-4 w-4" />
+                  <div className="flex items-center space-x-3 pl-0 sm:pl-4 self-start sm:self-center">
+                    {isSelectedDocActuallyMockActive ?
+                      <Server className="h-5 w-5 text-green-500 flex-shrink-0" /> :
+                      <ServerOff className="h-5 w-5 text-red-500 flex-shrink-0" />
                     }
-                    {isSelectedDocActuallyMockActive ? "Mock Active" : "Mock Inactive"}
-                  </Badge>
+                    <Label 
+                      htmlFor={`mock-toggle-main-${selectedDocument.id}`} 
+                      className="text-sm font-medium whitespace-nowrap"
+                    >
+                      {isSelectedDocActuallyMockActive ? "Mock Active" : "Mock Inactive"}
+                    </Label>
+                    <Switch
+                      id={`mock-toggle-main-${selectedDocument.id}`}
+                      checked={isSelectedDocActuallyMockActive}
+                      onCheckedChange={() => handleToggleMockActive(selectedDocument.id)}
+                      aria-label={`Toggle mock server for ${selectedDocument.title}`}
+                    />
+                  </div>
                 </div>
                 <p className="text-sm text-muted-foreground mb-6">
                   To use these mocks, ensure the mock server for this document is active. Your application can then hit paths under <code className="bg-muted px-1 py-0.5 rounded text-xs">/api/mock/...</code>.
