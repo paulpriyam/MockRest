@@ -29,8 +29,8 @@ export function ConfluenceDocsList({ documents, selectedDocId, onSelectDoc, onTo
     <ScrollArea className="h-full">
       <div className="p-2 space-y-1">
         {documents.map((doc) => (
-          <div 
-            key={doc.id} 
+          <div
+            key={doc.id}
             className={`flex items-center justify-between p-1 rounded-md hover:bg-muted/10 ${selectedDocId === doc.id ? 'bg-muted/20' : ''}`}
           >
             <Button
@@ -40,8 +40,11 @@ export function ConfluenceDocsList({ documents, selectedDocId, onSelectDoc, onTo
             >
               <span className="truncate text-sm font-medium">{doc.title}</span>
             </Button>
-            <div className="flex-shrink-0 flex items-center pl-2" onClick={(e) => e.stopPropagation()}>
-              {doc.isMockActive ? <Server className="h-4 w-4 text-green-500 mr-1.5" /> : <ServerOff className="h-4 w-4 text-red-500 mr-1.5"/>}
+            <div className="flex-shrink-0 flex items-center pl-2 pr-1" onClick={(e) => e.stopPropagation()}>
+              {doc.isMockActive ?
+                <Server className="h-4 w-4 text-green-500 mr-1.5" /> :
+                <ServerOff className="h-4 w-4 text-red-500 mr-1.5"/>
+              }
               <Switch
                 id={`mock-toggle-${doc.id}`}
                 checked={doc.isMockActive}
