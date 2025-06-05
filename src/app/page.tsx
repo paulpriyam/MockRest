@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { ConfluenceImportForm } from "@/components/import/ConfluenceImportForm";
 import { EndpointGrid } from "@/components/endpoints/EndpointGrid";
 import { ResponseEditorDialog } from "@/components/editor/ResponseEditorDialog";
@@ -13,7 +13,7 @@ export default function HomePage() {
   const [editingEndpoint, setEditingEndpoint] = useState<MockedEndpoint | null>(null);
   const { toast } = useToast();
 
-  const handleEndpointsParsed = (parsedDefs: ApiEndpointDefinition[]) => {
+  const handleEndpointsParsed = useCallback((parsedDefs: ApiEndpointDefinition[]) => {
     const newMockedEndpoints: MockedEndpoint[] = parsedDefs.map(def => ({
       ...def,
       mockResponse: def.defaultResponse, // Initialize mockResponse with defaultResponse
@@ -36,7 +36,7 @@ export default function HomePage() {
       description: `${parsedDefs.length} endpoint(s) have been imported and are ready to be mocked.`,
       variant: "default",
     });
-  };
+  }, [toast]);
 
   const handleOpenEditDialog = (endpointId: string) => {
     const endpointToEdit = mockedEndpoints.find(ep => ep.id === endpointId);
