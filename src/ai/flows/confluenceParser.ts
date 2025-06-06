@@ -11,9 +11,12 @@ export async function parseConfluenceApiDocumentation(url: string): Promise<{ ti
   try {
     const urlObject = new URL(url);
     const pathParts = urlObject.pathname.split('/');
-    const lastPart = pathParts.pop() || pathParts.pop(); // Get last non-empty part
+    let lastPart = pathParts.pop() || pathParts.pop(); // Get last non-empty part
     if (lastPart) {
-      title = decodeURIComponent(lastPart.replace(/[+-]/g, ' ')).substring(0, 50); // Basic title extraction
+      // Decode URI components and replace '+' or '-' with space, then take first 50 chars
+      title = decodeURIComponent(lastPart.replace(/[+-]/g, ' ')).substring(0, 60);
+      // Further clean up potential page IDs or trailing version numbers if they are purely numeric
+      title = title.replace(/\s+\d+$/, '').trim(); // Removes trailing numbers if they seem like IDs
     } else if (urlObject.hostname) {
       title = `Doc from ${urlObject.hostname}`;
     }
@@ -31,16 +34,17 @@ export async function parseConfluenceApiDocumentation(url: string): Promise<{ ti
   }
 
   let returnedEndpoints: ApiEndpointDefinition[];
+  const now = Date.now();
 
   if (url.toLowerCase().includes("edc")) {
     returnedEndpoints = [
       {
-        id: `ep_edc_${Date.now()}_details`,
+        id: `ep_edc_${now}_details`,
         method: 'GET',
         path: '/api/v1/edc/transaction/history',
         description: 'Retrieves detailed transaction history for EDC services.',
         defaultResponse: JSON.stringify({
-          reportId: `EDC_REPORT_${Date.now()}`,
+          reportId: `EDC_REPORT_${now}`,
           generatedAt: new Date().toISOString(),
           filterCriteria: "LAST_7_DAYS",
           summary: {
@@ -55,11 +59,84 @@ export async function parseConfluenceApiDocumentation(url: string): Promise<{ ti
         }, null, 2),
       }
     ];
-  } else {
-    // The original set of 5 mock endpoints
+  } else if (url.toLowerCase().includes("settlement")) {
     returnedEndpoints = [
       {
-        id: `ep_generic_${Date.now()}_1`,
+        id: `ep_settlement_${now}_1`,
+        method: 'GET',
+        path: '/api/v1/settlement/accounts',
+        description: 'Retrieves a list of all settlement bank accounts.',
+        defaultResponse: JSON.stringify({
+          page: 1,
+          pageSize: 10,
+          totalAccounts: 2,
+          accounts: [
+            { accountId: `sa_${now}_1`, bankName: 'Bank Central Asia', accountNumber: '1234567890', accountHolderName: 'PT Jaya Abadi' },
+            { accountId: `sa_${now}_2`, bankName: 'Bank Mandiri', accountNumber: '0987654321', accountHolderName: 'PT Sejahtera Selalu' }
+          ]
+        }, null, 2),
+      },
+      {
+        id: `ep_settlement_${now}_2`,
+        method: 'POST',
+        path: '/api/v1/settlement/accounts',
+        description: 'Adds a new settlement bank account.',
+        defaultResponse: JSON.stringify({
+          accountId: `sa_${now}_3`,
+          bankName: 'Bank Permata',
+          accountNumber: '1122334455',
+          accountHolderName: 'CV Maju Bersama',
+          status: 'pending_verification',
+          createdAt: new Date().toISOString()
+        }, null, 2),
+      },
+      {
+        id: `ep_settlement_${now}_3`,
+        method: 'GET',
+        path: '/api/v1/settlement/accounts/{accountId}',
+        description: 'Fetches details for a specific settlement bank account.',
+        defaultResponse: JSON.stringify({
+          accountId: `sa_${now}_1`,
+          bankName: 'Bank Central Asia',
+          accountNumber: '1234567890',
+          accountHolderName: 'PT Jaya Abadi',
+          currency: 'IDR',
+          isActive: true,
+          verifiedAt: new Date(Date.now() - 86400000 * 5).toISOString()
+        }, null, 2),
+      },
+      {
+        id: `ep_settlement_${now}_4`,
+        method: 'PUT',
+        path: '/api/v1/settlement/accounts/{accountId}',
+        description: 'Updates an existing settlement bank account (e.g., holder name).',
+        defaultResponse: JSON.stringify({
+          accountId: `sa_${now}_1`,
+          accountHolderName: 'PT Jaya Abadi Selamanya',
+          status: 'updated',
+          updatedAt: new Date().toISOString()
+        }, null, 2),
+      },
+       {
+        id: `ep_settlement_${now}_5`,
+        method: 'GET',
+        path: '/api/v1/settlements/history',
+        description: 'Retrieves settlement history with filters.',
+        defaultResponse: JSON.stringify({
+          filter: { startDate: "2024-01-01", endDate: "2024-01-31", status: "completed" },
+          totalRecords: 3,
+          settlements: [
+            { settlementId: `set_id_${now}_1`, amount: 5000000, currency: "IDR", settledAt: new Date(Date.now() - 86400000 * 2).toISOString(), destinationAccountId: `sa_${now}_1`},
+            { settlementId: `set_id_${now}_2`, amount: 12500000, currency: "IDR", settledAt: new Date(Date.now() - 86400000 * 7).toISOString(), destinationAccountId: `sa_${now}_2`},
+          ]
+        }, null, 2),
+      }
+    ];
+  } else {
+    // The original set of 5 mock endpoints for other URLs
+    returnedEndpoints = [
+      {
+        id: `ep_generic_${now}_1`,
         method: 'GET',
         path: '/api/v1/users',
         description: 'Retrieves a list of all users in the system. Supports pagination.',
@@ -71,7 +148,7 @@ export async function parseConfluenceApiDocumentation(url: string): Promise<{ ti
         }, null, 2),
       },
       {
-        id: `ep_generic_${Date.now()}_2`,
+        id: `ep_generic_${now}_2`,
         method: 'POST',
         path: '/api/v1/users',
         description: 'Creates a new user with the provided details.',
@@ -84,7 +161,7 @@ export async function parseConfluenceApiDocumentation(url: string): Promise<{ ti
         }, null, 2),
       },
       {
-        id: `ep_generic_${Date.now()}_3`,
+        id: `ep_generic_${now}_3`,
         method: 'GET',
         path: '/api/v1/products/{productId}',
         description: 'Fetches detailed information for a specific product by its ID.',
@@ -97,7 +174,7 @@ export async function parseConfluenceApiDocumentation(url: string): Promise<{ ti
         }, null, 2),
       },
       {
-        id: `ep_generic_${Date.now()}_4`,
+        id: `ep_generic_${now}_4`,
         method: 'PUT',
         path: '/api/v1/products/{productId}',
         description: 'Updates an existing product. All fields are replaced.',
@@ -111,7 +188,7 @@ export async function parseConfluenceApiDocumentation(url: string): Promise<{ ti
         }, null, 2),
       },
       {
-        id: `ep_generic_${Date.now()}_5`,
+        id: `ep_generic_${now}_5`,
         method: 'DELETE',
         path: '/api/v1/orders/{orderId}',
         description: 'Deletes a specific order. This action is irreversible.',
