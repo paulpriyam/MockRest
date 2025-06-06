@@ -1,206 +1,196 @@
 
-import type { ApiEndpointDefinition } from '@/lib/types';
+'use server';
+/**
+ * @fileOverview Parses Confluence API documentation using Genkit AI.
+ * - parseConfluenceApiDocumentation - Fetches and parses a Confluence page.
+ */
+import { ai } from '@/ai/genkit';
+import { z } from 'genkit'; // Changed from 'genkit/zod'
+import type { ApiEndpointDefinition, ExampleResponse as AppExampleResponse, HttpMethod } from '@/lib/types';
 
-// This is a mock implementation. In a real scenario, this would involve complex parsing via Genkit AI.
-// Assume this function is already instrumented and available as a Genkit flow.
+// Define Zod schemas for the LLM prompt's input and output structure
+const ExampleResponseSchema = z.object({
+  statusCode: z.number().describe("The HTTP status code for this example response (e.g., 200, 400, 404)."),
+  body: z.string().describe("The example response body, typically as a JSON string. Ensure JSON is correctly formatted if it's JSON. Preserve formatting like newlines and indentation if present in the source."),
+  description: z.string().optional().describe("An optional description for this specific response scenario (e.g., 'Successful retrieval', 'Invalid input', 'User not found').")
+});
+
+const ParsedApiEndpointSchema = z.object({
+  method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]).describe("The HTTP method."),
+  path: z.string().describe("The API path (e.g., /users/{id}). Extract path parameters in curly braces if present. Do not include the base URL or hostname."),
+  description: z.string().optional().describe("A brief description of the endpoint's purpose, functionality, and any important notes about its usage. Capture details about headers or query parameters if mentioned."),
+  exampleResponses: z.array(ExampleResponseSchema).min(1).describe("An array of example responses. Try to find responses for different status codes (e.g., 200, 400, 401, 404, 500). Prioritize successful (200-299) responses if multiple are found.")
+});
+
+const ConfluenceParseOutputSchema = z.object({
+  title: z.string().describe("The main title of the Confluence page. If not obvious, use the last part of the URL path, formatted nicely."),
+  endpoints: z.array(ParsedApiEndpointSchema).describe("An array of API endpoints parsed from the page content.")
+});
+
+// Define the Genkit prompt
+const confluenceParserPrompt = ai.definePrompt({
+  name: 'confluenceApiParserPrompt',
+  input: { schema: z.object({ pageUrl: z.string(), pageContent: z.string() }) },
+  output: { schema: ConfluenceParseOutputSchema },
+  prompt: `You are an expert API documentation parser. Given the content of a Confluence page (which might be HTML or plain text), your task is to extract API endpoint definitions.
+
+Confluence Page URL: {{{pageUrl}}}
+
+Page Content:
+\`\`\`
+{{{pageContent}}}
+\`\`\`
+
+Please parse the content and identify all API endpoints. For each endpoint, provide:
+1.  HTTP Method (e.g., GET, POST, PUT, DELETE).
+2.  Path (e.g., /users, /items/{itemId}, /edc-adapter/settlement/bank?terminal_id=yyy&is_primary=true). Do NOT include the base URL or hostname (like localhost:9080). Extract query parameters as part of the path if they are defining the endpoint.
+3.  A concise description of the endpoint, including any details about required headers or parameters if specified.
+4.  Example responses, including the HTTP status code and the response body. Try to capture different scenarios like success (200-299), client errors (400-499), and server errors (500-599) if examples are provided in the text. Ensure response bodies are complete and correctly formatted (e.g., valid JSON if the example is JSON). Preserve original formatting of the response body.
+
+If the page content is HTML, focus on the textual content that describes APIs. Pay attention to pre-formatted code blocks (often in <pre> or <code> tags), tables, and headings that might indicate API structures.
+The title of the page should be extracted. If a clear title isn't obvious from the content, derive a sensible title from the last segment of the page URL.
+
+Structure your output strictly according to the provided JSON schema.
+`,
+});
+
+// Define the Genkit flow
+const parseConfluenceFlow = ai.defineFlow(
+  {
+    name: 'parseConfluenceFlow',
+    inputSchema: z.object({ url: z.string().url("Invalid Confluence URL provided.") }),
+    // The flow will internally produce data matching ConfluenceParseOutputSchema, then transform it.
+    // The final output structure matches what parseConfluenceApiDocumentation is expected to return.
+    outputSchema: z.object({
+        title: z.string(),
+        endpoints: z.array(z.object({ // This reflects the App's ApiEndpointDefinition structure
+            id: z.string(), // Temporary ID, action will replace it
+            method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]),
+            path: z.string(),
+            description: z.string().optional(),
+            defaultResponse: z.string(),
+            exampleResponses: z.array(z.object({
+                statusCode: z.number(),
+                body: z.string(),
+                description: z.string().optional(),
+            })),
+        }))
+    })
+  },
+  async (input) => {
+    let pageContent = '';
+    try {
+      const response = await fetch(input.url);
+      if (!response.ok) {
+        // Try to get error message from Confluence if possible
+        let errorBody = '';
+        try {
+            errorBody = await response.text();
+        } catch (e) { /* ignore if cannot read body */ }
+        console.error(`Failed to fetch Confluence page: ${response.status} ${response.statusText}. Body: ${errorBody.substring(0, 500)}`);
+        throw new Error(`Failed to fetch Confluence page: ${response.status} ${response.statusText}. Check if the URL is publicly accessible and correct.`);
+      }
+      pageContent = await response.text();
+    } catch (error) {
+      console.error("Error fetching Confluence page:", error);
+      let title = "ErrorFetchingPage";
+       try {
+        const urlObject = new URL(input.url);
+        const pathParts = urlObject.pathname.split('/');
+        let lastPart = pathParts.pop() || pathParts.pop(); 
+        if (lastPart) {
+          title = decodeURIComponent(lastPart.replace(/[+-]/g, ' ')).substring(0, 60);
+          title = title.replace(/\s+\d+$/, '').trim();
+        } else if (urlObject.hostname) {
+          title = `Doc from ${urlObject.hostname}`;
+        }
+      } catch (e) {/* ignore title parsing error on top of fetch error */}
+      // Return a structure that includes the error in the title, and no endpoints
+      return { title: `${title} (Error: ${(error as Error).message})`, endpoints: [] };
+    }
+
+    // Safety net for extremely large pages, though model context window is the real limit.
+    // Gemini models typically have large context windows (e.g., 1M tokens for Pro, 32k for Flash).
+    // A 3MB HTML page might be too large. Let's be more conservative with truncation.
+    // Average token is ~4 chars. 1M tokens ~ 4MB. Gemini Flash might be ~128k chars.
+    // Truncating aggressively if it's very large to avoid hitting model limits or high costs.
+    const MAX_CONTENT_LENGTH = 500000; // Approx 500KB, adjust based on model and typical page size
+    if (pageContent.length > MAX_CONTENT_LENGTH) { 
+        console.warn(`Confluence page content for ${input.url} is very large (${pageContent.length} bytes). Truncating to ${MAX_CONTENT_LENGTH} bytes for AI processing.`);
+        pageContent = pageContent.substring(0, MAX_CONTENT_LENGTH);
+    }
+
+    const { output } = await confluenceParserPrompt({ pageUrl: input.url, pageContent });
+
+    if (!output) {
+      // This case should ideally be handled by Genkit if the prompt fails or output doesn't match schema.
+      // If output is null, it means the model call failed or returned nothing usable.
+      console.error("AI failed to parse Confluence page content or returned empty output for URL:", input.url);
+      let title = "ParsingFailed";
+       try {
+        const urlObject = new URL(input.url);
+        title = decodeURIComponent(new URL(input.url).pathname.split('/').pop() || 'Untitled').replace(/[+-]/g, ' ');
+      } catch(e) {/* ignore */}
+      return { title: `${title} (AI Parsing Error)`, endpoints: [] };
+    }
+    
+    const { title, endpoints: parsedEndpoints } = output;
+
+    // Transform ParsedApiEndpointSchema to App's ApiEndpointDefinition structure
+    const transformedEndpoints: ApiEndpointDefinition[] = parsedEndpoints.map((ep, index) => {
+      let defaultResponseBody = "";
+      // Try to find a 2xx response for the default
+      const successResponse = ep.exampleResponses.find(r => r.statusCode >= 200 && r.statusCode < 300);
+      if (successResponse) {
+        defaultResponseBody = successResponse.body;
+      } else if (ep.exampleResponses.length > 0) {
+        // Fallback to the first response if no 2xx
+        defaultResponseBody = ep.exampleResponses[0].body;
+        console.warn(`No 2xx response found for endpoint ${ep.method} ${ep.path} in ${input.url}. Using first available response as default.`);
+      } else {
+        console.warn(`No example responses found for endpoint ${ep.method} ${ep.path} in ${input.url}. Default response will be empty.`);
+      }
+      
+      // Ensure path starts with a slash if it doesn't have one and isn't empty
+      let finalPath = ep.path.trim();
+      if(finalPath && !finalPath.startsWith('/')) {
+        finalPath = '/' + finalPath;
+      }
+
+
+      return {
+        id: `temp_id_llm_${index}_${Math.random().toString(16).slice(2)}`, // Temporary ID, action will replace it
+        method: ep.method as HttpMethod,
+        path: finalPath,
+        description: ep.description,
+        defaultResponse: defaultResponseBody,
+        exampleResponses: ep.exampleResponses.map(er => ({
+            statusCode: er.statusCode,
+            body: er.body,
+            description: er.description,
+        } as AppExampleResponse)),
+      };
+    });
+
+    return { title, endpoints: transformedEndpoints };
+  }
+);
+
+// Exported function that the rest of the app uses
 export async function parseConfluenceApiDocumentation(url: string): Promise<{ title: string; endpoints: ApiEndpointDefinition[] }> {
-  // console.log(`AI Flow: Parsing Confluence URL: ${url}`);
-  await new Promise(resolve => setTimeout(resolve, 1500));
-
-  let title = "Untitled API Document";
+  if (!url || typeof url !== 'string' || (!url.startsWith("http://") && !url.startsWith("https://"))) {
+     throw new Error("Invalid or empty Confluence URL provided. Must be a valid HTTP/HTTPS URL.");
+  }
   try {
-    const urlObject = new URL(url);
-    const pathParts = urlObject.pathname.split('/');
-    let lastPart = pathParts.pop() || pathParts.pop(); // Get last non-empty part
-    if (lastPart) {
-      // Decode URI components and replace '+' or '-' with space, then take first 50 chars
-      title = decodeURIComponent(lastPart.replace(/[+-]/g, ' ')).substring(0, 60);
-      // Further clean up potential page IDs or trailing version numbers if they are purely numeric
-      title = title.replace(/\s+\d+$/, '').trim(); // Removes trailing numbers if they seem like IDs
-    } else if (urlObject.hostname) {
-      title = `Doc from ${urlObject.hostname}`;
-    }
-  } catch (e) {
-    // console.warn("Could not parse URL for title, using default.");
+    // The defineFlow returns a function that directly takes the input schema type and returns the output schema type.
+    return await parseConfluenceFlow({ url });
+  } catch (error) {
+    console.error(`Error in parseConfluenceFlow for URL ${url}:`, error);
+    let title = "ProcessingError";
+    try {
+      title = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'Untitled').replace(/[+-]/g, ' ');
+    } catch(e) {/*ignore*/}
+    // Ensure a valid structure is returned even on flow error
+    return { title: `${title} (Flow Error: ${(error as Error).message})`, endpoints: [] };
   }
-  
-
-  if (!url || (!url.includes("http://") && !url.includes("https://"))) {
-    if (url && !url.toLowerCase().includes("confluence")) {
-       console.warn("URL does not seem to be a Confluence link, but proceeding with mock data for demonstration.");
-    } else if (!url) {
-      throw new Error("Invalid or empty Confluence URL provided.");
-    }
-  }
-
-  let returnedEndpoints: ApiEndpointDefinition[];
-  const now = Date.now();
-
-  if (url.toLowerCase().includes("edc")) {
-    returnedEndpoints = [
-      {
-        id: `ep_edc_${now}_details`,
-        method: 'GET',
-        path: '/api/v1/edc/transaction/history',
-        description: 'Retrieves detailed transaction history for EDC services.',
-        defaultResponse: JSON.stringify({
-          reportId: `EDC_REPORT_${now}`,
-          generatedAt: new Date().toISOString(),
-          filterCriteria: "LAST_7_DAYS",
-          summary: {
-            totalTransactions: 5,
-            totalAmount: 750.00,
-            currency: "IDR"
-          },
-          transactions: [
-            { id: 'edc_tx_abc_123', amount: 150.75, status: 'completed', timestamp: new Date(Date.now() - 86400000).toISOString() },
-            { id: 'edc_tx_def_456', amount: 88.00, status: 'completed', timestamp: new Date(Date.now() - 172800000).toISOString() }
-          ]
-        }, null, 2),
-      }
-    ];
-  } else if (url.toLowerCase().includes("settlement")) {
-    returnedEndpoints = [
-      {
-        id: `ep_settlement_${now}_1`,
-        method: 'GET',
-        path: '/api/v1/settlement/accounts',
-        description: 'Retrieves a list of all settlement bank accounts.',
-        defaultResponse: JSON.stringify({
-          page: 1,
-          pageSize: 10,
-          totalAccounts: 2,
-          accounts: [
-            { accountId: `sa_${now}_1`, bankName: 'Bank Central Asia', accountNumber: '1234567890', accountHolderName: 'PT Jaya Abadi' },
-            { accountId: `sa_${now}_2`, bankName: 'Bank Mandiri', accountNumber: '0987654321', accountHolderName: 'PT Sejahtera Selalu' }
-          ]
-        }, null, 2),
-      },
-      {
-        id: `ep_settlement_${now}_2`,
-        method: 'POST',
-        path: '/api/v1/settlement/accounts',
-        description: 'Adds a new settlement bank account.',
-        defaultResponse: JSON.stringify({
-          accountId: `sa_${now}_3`,
-          bankName: 'Bank Permata',
-          accountNumber: '1122334455',
-          accountHolderName: 'CV Maju Bersama',
-          status: 'pending_verification',
-          createdAt: new Date().toISOString()
-        }, null, 2),
-      },
-      {
-        id: `ep_settlement_${now}_3`,
-        method: 'GET',
-        path: '/api/v1/settlement/accounts/{accountId}',
-        description: 'Fetches details for a specific settlement bank account.',
-        defaultResponse: JSON.stringify({
-          accountId: `sa_${now}_1`,
-          bankName: 'Bank Central Asia',
-          accountNumber: '1234567890',
-          accountHolderName: 'PT Jaya Abadi',
-          currency: 'IDR',
-          isActive: true,
-          verifiedAt: new Date(Date.now() - 86400000 * 5).toISOString()
-        }, null, 2),
-      },
-      {
-        id: `ep_settlement_${now}_4`,
-        method: 'PUT',
-        path: '/api/v1/settlement/accounts/{accountId}',
-        description: 'Updates an existing settlement bank account (e.g., holder name).',
-        defaultResponse: JSON.stringify({
-          accountId: `sa_${now}_1`,
-          accountHolderName: 'PT Jaya Abadi Selamanya',
-          status: 'updated',
-          updatedAt: new Date().toISOString()
-        }, null, 2),
-      },
-       {
-        id: `ep_settlement_${now}_5`,
-        method: 'GET',
-        path: '/api/v1/settlements/history',
-        description: 'Retrieves settlement history with filters.',
-        defaultResponse: JSON.stringify({
-          filter: { startDate: "2024-01-01", endDate: "2024-01-31", status: "completed" },
-          totalRecords: 3,
-          settlements: [
-            { settlementId: `set_id_${now}_1`, amount: 5000000, currency: "IDR", settledAt: new Date(Date.now() - 86400000 * 2).toISOString(), destinationAccountId: `sa_${now}_1`},
-            { settlementId: `set_id_${now}_2`, amount: 12500000, currency: "IDR", settledAt: new Date(Date.now() - 86400000 * 7).toISOString(), destinationAccountId: `sa_${now}_2`},
-          ]
-        }, null, 2),
-      }
-    ];
-  } else {
-    // The original set of 5 mock endpoints for other URLs
-    returnedEndpoints = [
-      {
-        id: `ep_generic_${now}_1`,
-        method: 'GET',
-        path: '/api/v1/users',
-        description: 'Retrieves a list of all users in the system. Supports pagination.',
-        defaultResponse: JSON.stringify({
-          page: 1,
-          pageSize: 20,
-          totalUsers: 150,
-          users: [{ id: 'user123', name: 'Alice Wonderland', email: 'alice@example.com' }]
-        }, null, 2),
-      },
-      {
-        id: `ep_generic_${now}_2`,
-        method: 'POST',
-        path: '/api/v1/users',
-        description: 'Creates a new user with the provided details.',
-        defaultResponse: JSON.stringify({
-          id: 'user456',
-          name: 'Bob The Builder',
-          email: 'bob@example.com',
-          status: 'created',
-          createdAt: new Date().toISOString()
-        }, null, 2),
-      },
-      {
-        id: `ep_generic_${now}_3`,
-        method: 'GET',
-        path: '/api/v1/products/{productId}',
-        description: 'Fetches detailed information for a specific product by its ID.',
-        defaultResponse: JSON.stringify({
-          productId: 'prod789',
-          name: 'Super Widget',
-          price: 29.99,
-          inStock: true,
-          specs: { color: 'blue', weight: '250g' }
-        }, null, 2),
-      },
-      {
-        id: `ep_generic_${now}_4`,
-        method: 'PUT',
-        path: '/api/v1/products/{productId}',
-        description: 'Updates an existing product. All fields are replaced.',
-        defaultResponse: JSON.stringify({
-          productId: 'prod789',
-          name: 'Super Widget Deluxe',
-          price: 32.50,
-          inStock: true,
-          status: 'updated',
-          updatedAt: new Date().toISOString()
-        }, null, 2),
-      },
-      {
-        id: `ep_generic_${now}_5`,
-        method: 'DELETE',
-        path: '/api/v1/orders/{orderId}',
-        description: 'Deletes a specific order. This action is irreversible.',
-        defaultResponse: JSON.stringify({
-          orderId: 'order101',
-          status: 'deleted',
-          deletedAt: new Date().toISOString()
-        }, null, 2),
-      }
-    ];
-  }
-
-  return { title, endpoints: returnedEndpoints };
 }
-
