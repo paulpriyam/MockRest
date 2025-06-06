@@ -5,7 +5,7 @@
  * - parseConfluenceApiDocumentation - Fetches and parses a Confluence page.
  */
 import { ai } from '@/ai/genkit';
-import { z } from 'genkit'; // Changed from 'genkit/zod'
+import { z } from 'genkit'; 
 import type { ApiEndpointDefinition, ExampleResponse as AppExampleResponse, HttpMethod } from '@/lib/types';
 
 // Define Zod schemas for the LLM prompt's input and output structure
@@ -50,6 +50,8 @@ Please parse the content and identify all API endpoints. For each endpoint, prov
 If the page content is HTML, focus on the textual content that describes APIs. Pay attention to pre-formatted code blocks (often in <pre> or <code> tags), tables, and headings that might indicate API structures.
 The title of the page should be extracted. If a clear title isn't obvious from the content, derive a sensible title from the last segment of the page URL.
 
+If no API endpoints are found, return an empty array for the 'endpoints' field.
+
 Structure your output strictly according to the provided JSON schema.
 `,
 });
@@ -59,12 +61,10 @@ const parseConfluenceFlow = ai.defineFlow(
   {
     name: 'parseConfluenceFlow',
     inputSchema: z.object({ url: z.string().url("Invalid Confluence URL provided.") }),
-    // The flow will internally produce data matching ConfluenceParseOutputSchema, then transform it.
-    // The final output structure matches what parseConfluenceApiDocumentation is expected to return.
     outputSchema: z.object({
         title: z.string(),
-        endpoints: z.array(z.object({ // This reflects the App's ApiEndpointDefinition structure
-            id: z.string(), // Temporary ID, action will replace it
+        endpoints: z.array(z.object({ 
+            id: z.string(), 
             method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]),
             path: z.string(),
             description: z.string().optional(),
@@ -79,87 +79,83 @@ const parseConfluenceFlow = ai.defineFlow(
   },
   async (input) => {
     let pageContent = '';
+    let derivedTitleForError = "UntitledPage";
     try {
+      const urlObject = new URL(input.url);
+      derivedTitleForError = decodeURIComponent(urlObject.pathname.split('/').pop() || 'UntitledPage').replace(/[+-]/g, ' ');
+    } catch (e) { /* ignore error in deriving title for error cases */ }
+
+
+    try {
+      console.log(`[ConfluenceParser] Fetching URL: ${input.url}`);
       const response = await fetch(input.url);
       if (!response.ok) {
-        // Try to get error message from Confluence if possible
         let errorBody = '';
         try {
             errorBody = await response.text();
         } catch (e) { /* ignore if cannot read body */ }
-        console.error(`Failed to fetch Confluence page: ${response.status} ${response.statusText}. Body: ${errorBody.substring(0, 500)}`);
+        console.error(`[ConfluenceParser] Failed to fetch Confluence page: ${response.status} ${response.statusText}. URL: ${input.url}. Body: ${errorBody.substring(0, 500)}`);
         throw new Error(`Failed to fetch Confluence page: ${response.status} ${response.statusText}. Check if the URL is publicly accessible and correct.`);
       }
       pageContent = await response.text();
+      console.log(`[ConfluenceParser] Fetched content length for ${input.url}: ${pageContent.length} bytes.`);
     } catch (error) {
-      console.error("Error fetching Confluence page:", error);
-      let title = "ErrorFetchingPage";
-       try {
-        const urlObject = new URL(input.url);
-        const pathParts = urlObject.pathname.split('/');
-        let lastPart = pathParts.pop() || pathParts.pop(); 
-        if (lastPart) {
-          title = decodeURIComponent(lastPart.replace(/[+-]/g, ' ')).substring(0, 60);
-          title = title.replace(/\s+\d+$/, '').trim();
-        } else if (urlObject.hostname) {
-          title = `Doc from ${urlObject.hostname}`;
-        }
-      } catch (e) {/* ignore title parsing error on top of fetch error */}
-      // Return a structure that includes the error in the title, and no endpoints
-      return { title: `${title} (Error: ${(error as Error).message})`, endpoints: [] };
+      console.error(`[ConfluenceParser] Error fetching Confluence page ${input.url}:`, error);
+      return { title: `${derivedTitleForError} (Error: ${(error as Error).message})`, endpoints: [] };
     }
 
-    // Safety net for extremely large pages, though model context window is the real limit.
-    // Gemini models typically have large context windows (e.g., 1M tokens for Pro, 32k for Flash).
-    // A 3MB HTML page might be too large. Let's be more conservative with truncation.
-    // Average token is ~4 chars. 1M tokens ~ 4MB. Gemini Flash might be ~128k chars.
-    // Truncating aggressively if it's very large to avoid hitting model limits or high costs.
-    const MAX_CONTENT_LENGTH = 500000; // Approx 500KB, adjust based on model and typical page size
+    if (!pageContent.trim()) {
+        console.warn(`[ConfluenceParser] Fetched empty page content for ${input.url}.`);
+        return { title: `${derivedTitleForError} (Error: Fetched empty content)`, endpoints: [] };
+    }
+    
+    const MAX_CONTENT_LENGTH = 500000; 
     if (pageContent.length > MAX_CONTENT_LENGTH) { 
-        console.warn(`Confluence page content for ${input.url} is very large (${pageContent.length} bytes). Truncating to ${MAX_CONTENT_LENGTH} bytes for AI processing.`);
+        console.warn(`[ConfluenceParser] Confluence page content for ${input.url} is very large (${pageContent.length} bytes). Truncating to ${MAX_CONTENT_LENGTH} bytes for AI processing.`);
         pageContent = pageContent.substring(0, MAX_CONTENT_LENGTH);
     }
 
+    console.log(`[ConfluenceParser] Calling AI prompt for ${input.url}. Content length sent: ${pageContent.length}`);
     const { output } = await confluenceParserPrompt({ pageUrl: input.url, pageContent });
 
+    if (process.env.NODE_ENV === 'development') {
+        console.log(`[ConfluenceParser] Raw AI Output for ${input.url}: ${JSON.stringify(output, null, 2)}`);
+    }
+
     if (!output) {
-      // This case should ideally be handled by Genkit if the prompt fails or output doesn't match schema.
-      // If output is null, it means the model call failed or returned nothing usable.
-      console.error("AI failed to parse Confluence page content or returned empty output for URL:", input.url);
-      let title = "ParsingFailed";
-       try {
-        const urlObject = new URL(input.url);
-        title = decodeURIComponent(new URL(input.url).pathname.split('/').pop() || 'Untitled').replace(/[+-]/g, ' ');
-      } catch(e) {/* ignore */}
-      return { title: `${title} (AI Parsing Error)`, endpoints: [] };
+      console.error(`[ConfluenceParser] AI prompt returned null or undefined for URL: ${input.url}. This might indicate a failure in the LLM call or schema mismatch.`);
+      return { title: `${derivedTitleForError} (AI Parsing Error - No Output from LLM)`, endpoints: [] };
     }
     
-    const { title, endpoints: parsedEndpoints } = output;
+    const { title: llmTitle, endpoints: parsedEndpointsFromLLM } = output;
 
-    // Transform ParsedApiEndpointSchema to App's ApiEndpointDefinition structure
-    const transformedEndpoints: ApiEndpointDefinition[] = parsedEndpoints.map((ep, index) => {
+    if (!parsedEndpointsFromLLM || parsedEndpointsFromLLM.length === 0) {
+        console.warn(`[ConfluenceParser] AI returned 0 endpoints for ${input.url}. LLM Title: "${llmTitle}".`);
+        const finalTitle = llmTitle || `${derivedTitleForError} (0 Endpoints Found by AI)`;
+        return { title: finalTitle, endpoints: [] };
+    }
+    
+    console.log(`[ConfluenceParser] AI successfully parsed ${parsedEndpointsFromLLM.length} endpoint(s) for ${input.url}. Title: "${llmTitle}".`);
+
+    const transformedEndpoints: ApiEndpointDefinition[] = parsedEndpointsFromLLM.map((ep, index) => {
       let defaultResponseBody = "";
-      // Try to find a 2xx response for the default
       const successResponse = ep.exampleResponses.find(r => r.statusCode >= 200 && r.statusCode < 300);
       if (successResponse) {
         defaultResponseBody = successResponse.body;
       } else if (ep.exampleResponses.length > 0) {
-        // Fallback to the first response if no 2xx
         defaultResponseBody = ep.exampleResponses[0].body;
-        console.warn(`No 2xx response found for endpoint ${ep.method} ${ep.path} in ${input.url}. Using first available response as default.`);
+        console.warn(`[ConfluenceParser] No 2xx response found for endpoint ${ep.method} ${ep.path} in ${input.url}. Using first available response (Status: ${ep.exampleResponses[0].statusCode}) as default.`);
       } else {
-        console.warn(`No example responses found for endpoint ${ep.method} ${ep.path} in ${input.url}. Default response will be empty.`);
+        console.warn(`[ConfluenceParser] No example responses found for endpoint ${ep.method} ${ep.path} in ${input.url}. Default response will be empty.`);
       }
       
-      // Ensure path starts with a slash if it doesn't have one and isn't empty
       let finalPath = ep.path.trim();
       if(finalPath && !finalPath.startsWith('/')) {
         finalPath = '/' + finalPath;
       }
 
-
       return {
-        id: `temp_id_llm_${index}_${Math.random().toString(16).slice(2)}`, // Temporary ID, action will replace it
+        id: `temp_id_llm_${index}_${Math.random().toString(16).slice(2)}`,
         method: ep.method as HttpMethod,
         path: finalPath,
         description: ep.description,
@@ -172,25 +168,23 @@ const parseConfluenceFlow = ai.defineFlow(
       };
     });
 
-    return { title, endpoints: transformedEndpoints };
+    return { title: llmTitle, endpoints: transformedEndpoints };
   }
 );
 
-// Exported function that the rest of the app uses
 export async function parseConfluenceApiDocumentation(url: string): Promise<{ title: string; endpoints: ApiEndpointDefinition[] }> {
   if (!url || typeof url !== 'string' || (!url.startsWith("http://") && !url.startsWith("https://"))) {
+     console.error("[ConfluenceParserClient] Invalid URL provided:", url);
      throw new Error("Invalid or empty Confluence URL provided. Must be a valid HTTP/HTTPS URL.");
   }
   try {
-    // The defineFlow returns a function that directly takes the input schema type and returns the output schema type.
     return await parseConfluenceFlow({ url });
   } catch (error) {
-    console.error(`Error in parseConfluenceFlow for URL ${url}:`, error);
+    console.error(`[ConfluenceParserClient] Error in parseConfluenceFlow for URL ${url}:`, error);
     let title = "ProcessingError";
     try {
       title = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'Untitled').replace(/[+-]/g, ' ');
     } catch(e) {/*ignore*/}
-    // Ensure a valid structure is returned even on flow error
     return { title: `${title} (Flow Error: ${(error as Error).message})`, endpoints: [] };
   }
 }
